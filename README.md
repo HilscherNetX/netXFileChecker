@@ -6,6 +6,7 @@ options:
          -h    print help
          -u    use case A|B|C default:A, used for flash dump analysis and creation
          -s    split, in case of a flash dump analysis, separate files are created
+         -fdl  creates a FDL - Flash Device Label
 
 flash image analysis requires specification of use case (command line parameter -u)
 no automatic evaluation of FDL supported
@@ -14,6 +15,7 @@ flash image analysis requires a input file with suffix *.bin
 
 file analysis depends on file suffix
 no automatic file type detection supported
+FDL generator ignores -u option, creates just use case A FDL
 
 file suffixs:
          .bin flash dump
