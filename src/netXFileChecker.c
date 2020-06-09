@@ -1,10 +1,23 @@
 /*
  ============================================================================
  Name        : netxFlashAnalyzer.c
- Author      : 
- Version     :
- Copyright   : Your copyright notice
- Description : Hello World in C, Ansi-style
+ Author      : Dirk Fischer
+ Version     : 1.1.0.0
+ Copyright   : Hilscher Gesellschaft für Systemautomation mbH
+               MIT License
+ Description : netXFileChecker utility to analyse netX 90 flash memory dumps
+               or single files like *.fdl, *.nxi, etc.
+               utility provides FDL generator functionality
+
+ ChangeLog:
+               V1.1.0.0 2020-06-09  updated Hil_DeviceProductionData.h
+                                    added functionality to CreateFDL()
+                                      - works for use case A now
+                                      - added CRC32 checksum calculation
+                                      - no use case B/C support yet
+
+               V1.0.0.0 2020-04-23 Initial
+
  ============================================================================
  */
 
@@ -20,6 +33,9 @@
 #include "Hil_DeviceProductionData.h"
 
 #define MAX_FILENAME_LEN 100
+
+uint32_t PS_CRC32(uint32_t ulPrevCrc, const uint8_t* pabBuffer, size_t numBytes);
+
 
 
 FILE_T tFlashDumpFile[][8] ={
@@ -68,14 +84,13 @@ FILE_T tSQIDumpFile[][3] ={
 
 
 
-
 void printHelp(char* szCommandName){
 	printf("usage: %s options filename\n",szCommandName);
 	printf("options: \n");
 	printf("         -h    print help\n");
 	printf("         -u    use case A|B|C default:A, used for flash dump analysis and creation\n");
 	printf("         -s    split, in case of a flash dump analysis, separate files are created\n");
-//	printf("         -fdl  create a standard flash device label, parameter -u might be used\n");
+	printf("         -fdl  create a standard flash device label, parameter -u might be used\n");
 
 	printf("\nflash image analysis requires specification of use case (command line parameter -u)\n"
 			"no automatic evaluation of FDL supported\n");
@@ -83,7 +98,8 @@ void printHelp(char* szCommandName){
 	printf("\nflash image analysis requires an input file with suffix *.bin\n");
 
 	printf("\nfile analysis depends on file suffix\n"
-			"no automatic file type detection supported\n");
+			"no automatic file type detection supported\n"
+			"FDL generator supports use case A only\n");
 
 
 	printf("\nfile suffixs: \n");
@@ -560,6 +576,7 @@ int AnalyzeFDL(fpos_t offset, FILE* hInFile){
 int CreateFDL(char* szFileName, int iUseCase){
 	int i=0;
 	uint8_t *abBuffer=0;
+	uint32_t ulChecksum=0;
 	size_t size=sizeof(HIL_PRODUCT_DATA_LABEL_T);
 	FILE* hOutFile=NULL;
 
@@ -582,13 +599,20 @@ int CreateFDL(char* szFileName, int iUseCase){
 	ptFDL->tHeader.usLabelSize=ptFDL->tHeader.usContentSize+sizeof(HIL_PRODUCT_DATA_HEADER_T)+sizeof(HIL_PRODUCT_DATA_FOOTER_T);
 
 /*BODY*/
-	ptFDL->tProductData.tBasicDeviceData.usManufacturer=0x1234;
-	ptFDL->tProductData.tBasicDeviceData.usDeviceClass=HIL_HW_DEV_CLASS_UNDEFINED;
-	ptFDL->tProductData.tBasicDeviceData.ulDeviceNumber=0x1234;
-	ptFDL->tProductData.tBasicDeviceData.ulSerialNumber=0x12345678;
-	ptFDL->tProductData.tBasicDeviceData.usProductionDate=1934; // Format is 0xYYWW, YY + 2000
-	ptFDL->tProductData.tBasicDeviceData.bHwRevision=0x00;
-	ptFDL->tProductData.tBasicDeviceData.bHwRevision=0x01;
+
+
+/*	  HIL_PRODUCT_DATA_BASIC_DEVICE_DATA_T        tBasicDeviceData;*/
+
+	ptFDL->tProductData.tBasicDeviceData.usManufacturer=0x0001;
+	ptFDL->tProductData.tBasicDeviceData.usDeviceClass=HIL_HW_DEV_CLASS_CHIP_NETX_90_COM;
+	ptFDL->tProductData.tBasicDeviceData.ulDeviceNumber=7833000;
+	ptFDL->tProductData.tBasicDeviceData.ulSerialNumber=20000;
+	ptFDL->tProductData.tBasicDeviceData.usProductionDate=0x112B; // Format is 0xYYWW, YY + 2000
+	ptFDL->tProductData.tBasicDeviceData.bHwRevision=0x03;
+	ptFDL->tProductData.tBasicDeviceData.bHwCompatibility=0x00;
+
+
+/*	  HIL_PRODUCT_DATA_LIBSTORAGE_T               tFlashLayout;*/
 
 	ptFDL->tProductData.tFlashLayout.atChip[0].ulChipNumber=0;
 	ptFDL->tProductData.tFlashLayout.atChip[0].ulFlashSize=0x00080000; //512KB
@@ -602,26 +626,66 @@ int CreateFDL(char* szFileName, int iUseCase){
 
 
 	memcpy(ptFDL->tProductData.tFlashLayout.atArea[0].szName,"HWConfig",sizeof("HWConfig"));
-	ptFDL->tProductData.tFlashLayout.atArea[0].ulContentType=0x01;
+	ptFDL->tProductData.tFlashLayout.atArea[0].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_HWCONFIG;
 	ptFDL->tProductData.tFlashLayout.atArea[0].ulChipNumber=0;
 	ptFDL->tProductData.tFlashLayout.atArea[0].ulAreaStart=0x00100000;
 	ptFDL->tProductData.tFlashLayout.atArea[0].ulAreaSize=0x00002000;
 	ptFDL->tProductData.tFlashLayout.atArea[0].bAccessTyp=0x00; // read only
 
 	memcpy(ptFDL->tProductData.tFlashLayout.atArea[1].szName,"FDL",sizeof("FDL"));
-	ptFDL->tProductData.tFlashLayout.atArea[1].ulContentType=0x02;
+	ptFDL->tProductData.tFlashLayout.atArea[1].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_FDL;
 	ptFDL->tProductData.tFlashLayout.atArea[1].ulChipNumber=0;
 	ptFDL->tProductData.tFlashLayout.atArea[1].ulAreaStart=0x00102000;
 	ptFDL->tProductData.tFlashLayout.atArea[1].ulAreaSize=0x00001000;
 	ptFDL->tProductData.tFlashLayout.atArea[1].bAccessTyp=0x00; // read only
 
 	memcpy(ptFDL->tProductData.tFlashLayout.atArea[2].szName,"FW",sizeof("FW"));
-	ptFDL->tProductData.tFlashLayout.atArea[2].ulContentType=0x03;
+	ptFDL->tProductData.tFlashLayout.atArea[2].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_FW;
 	ptFDL->tProductData.tFlashLayout.atArea[2].ulChipNumber=0;
 	ptFDL->tProductData.tFlashLayout.atArea[2].ulAreaStart=0x00103000;
 	ptFDL->tProductData.tFlashLayout.atArea[2].ulAreaSize=0x0007D000;
 	ptFDL->tProductData.tFlashLayout.atArea[2].bAccessTyp=0x00; // read only
 
+
+
+	memcpy(ptFDL->tProductData.tFlashLayout.atArea[3].szName,"FWUpdate",sizeof("FWUpdate"));
+	ptFDL->tProductData.tFlashLayout.atArea[3].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_FWUPDATE;
+	ptFDL->tProductData.tFlashLayout.atArea[3].ulChipNumber=1;
+	ptFDL->tProductData.tFlashLayout.atArea[3].ulAreaStart=0x00180000;
+	ptFDL->tProductData.tFlashLayout.atArea[3].ulAreaSize=0x0005F000;
+	ptFDL->tProductData.tFlashLayout.atArea[3].bAccessTyp=0x02; // read write
+
+	memcpy(ptFDL->tProductData.tFlashLayout.atArea[4].szName,"MFW_HWConfig",sizeof("MFW_HWConfig"));
+	ptFDL->tProductData.tFlashLayout.atArea[4].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_MFW_HWCONFIG;
+	ptFDL->tProductData.tFlashLayout.atArea[4].ulChipNumber=1;
+	ptFDL->tProductData.tFlashLayout.atArea[4].ulAreaStart=0x001DF000;
+	ptFDL->tProductData.tFlashLayout.atArea[4].ulAreaSize=0x00002000;
+	ptFDL->tProductData.tFlashLayout.atArea[4].bAccessTyp=0x00; // read only
+
+	memcpy(ptFDL->tProductData.tFlashLayout.atArea[5].szName,"Maintenance",sizeof("Maintenance"));
+	ptFDL->tProductData.tFlashLayout.atArea[5].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_MFW;
+	ptFDL->tProductData.tFlashLayout.atArea[5].ulChipNumber=1;
+	ptFDL->tProductData.tFlashLayout.atArea[5].ulAreaStart=0x001E1000;
+	ptFDL->tProductData.tFlashLayout.atArea[5].ulAreaSize=0x00015000;
+	ptFDL->tProductData.tFlashLayout.atArea[5].bAccessTyp=0x00; // read only
+
+	memcpy(ptFDL->tProductData.tFlashLayout.atArea[6].szName,"Remanent",sizeof("Remanent"));
+	ptFDL->tProductData.tFlashLayout.atArea[6].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_REMANENT;
+	ptFDL->tProductData.tFlashLayout.atArea[6].ulChipNumber=1;
+	ptFDL->tProductData.tFlashLayout.atArea[6].ulAreaStart=0x001F6000;
+	ptFDL->tProductData.tFlashLayout.atArea[6].ulAreaSize=0x00008000;
+	ptFDL->tProductData.tFlashLayout.atArea[6].bAccessTyp=0x02; // read write
+
+	memcpy(ptFDL->tProductData.tFlashLayout.atArea[7].szName,"Management",sizeof("Management"));
+	ptFDL->tProductData.tFlashLayout.atArea[7].ulContentType=HIL_PRODUCT_DATA_FLASH_LAYOUT_CONTENT_TYPE_MANAGEMENT;
+	ptFDL->tProductData.tFlashLayout.atArea[7].ulChipNumber=1;
+	ptFDL->tProductData.tFlashLayout.atArea[7].ulAreaStart=0x001FE000;
+	ptFDL->tProductData.tFlashLayout.atArea[7].ulAreaSize=0x00002000;
+	ptFDL->tProductData.tFlashLayout.atArea[7].bAccessTyp=0x02; // read write
+
+
+
+/*	  HIL_PRODUCT_DATA_MAC_ADDRESSES_COM_T        tMACAddressesCom;*/
 
 	uint8_t abMacCom[4][6]={
 			{0x02,0x00,0x00,0x1E,0x99,0x00},
@@ -634,21 +698,37 @@ int CreateFDL(char* szFileName, int iUseCase){
 		memcpy(ptFDL->tProductData.tMACAddressesCom.atMAC[i].abMacAddress,abMacCom[i],sizeof(abMacCom[i]));
 	}
 
+
+/*	  HIL_PRODUCT_DATA_MAC_ADDRESSES_APP_T        tMACAddressesApp;*/
+
+	// UNUSED, keep 0x00
+
+
+/*	  HIL_PRODUCT_DATA_OEM_IDENTIFICATION_T       tOEMIdentification;*/
+#if(0)
 	ptFDL->tProductData.tOEMIdentification.ulOemDataOptionFlags=0x0000000F;
 	memcpy(ptFDL->tProductData.tOEMIdentification.szSerialNumber,"F-1234-5678",sizeof("F-1234-5678"));
-	memcpy(ptFDL->tProductData.tOEMIdentification.szOrderNumber,"ART_NR_0815",sizeof("ART_NR_0815"));
+	memcpy(ptFDL->tProductData.tOEMIdentification.szOrderNumber,"0815",sizeof("0815"));
 	memcpy(ptFDL->tProductData.tOEMIdentification.szHardwareRevision,"01",sizeof("01"));
 	memcpy(ptFDL->tProductData.tOEMIdentification.szProductionDate,"2020-04-01",sizeof("2020-04-01"));
 
-	// unused
-	//ptFDL->tProductData.tProductIdentification.tUSBInfo
+
+/*	  HIL_PRODUCT_DATA_PRODUCT_IDENTIFICATION_T   tProductIdentification;*/
+
+	ptFDL->tProductData.tProductIdentification.tUSBInfo.usUSBProductID=0x1234;
+	ptFDL->tProductData.tProductIdentification.tUSBInfo.usUSBVendorID=0x1234;
+	memcpy(ptFDL->tProductData.tProductIdentification.tUSBInfo.abUSBProductName,"ProductABC",sizeof("ProductABC"));
+	memcpy(ptFDL->tProductData.tProductIdentification.tUSBInfo.abUSBVendorName,"VendorABC",sizeof("VendorABC"));
+#endif
 
 
+	/*calculate checksum CRC-32 (IEEE 802.3) of content ptFDL->tProductData*/
+	ulChecksum=PS_CRC32(0x00000000,(uint8_t *)&ptFDL->tProductData,sizeof(HIL_PRODUCT_DATA_T));
 
 
 
 /*FOOTER*/
-	ptFDL->tFooter.ulChecksum=0x12345678; // TODO: claculate checksum
+	ptFDL->tFooter.ulChecksum=ulChecksum;
 	memcpy(ptFDL->tFooter.abEndToken,HIL_PRODUCT_DATA_END_TOKEN,strlen(HIL_PRODUCT_DATA_END_TOKEN));
 
 
