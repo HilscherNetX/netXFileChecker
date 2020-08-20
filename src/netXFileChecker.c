@@ -794,17 +794,23 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 	else{
-		for(i=1;i<(argc-1);i++){
+		for(i=1;i<argc;i++){
 			if(!strcmp(argv[i],"-s")){
 				bSplitFlashImage=true;
-				break;
+				continue;
 			}
 			if(!strcmp(argv[i],"-fdl")){
 				bCreateFDL=true;
-				break;
+				continue;
 			}
 			if(!strcmp(argv[i],"-u")){
-				switch (argv[++i][0]){
+				i++;
+				if (i == argc) {
+					printf("error: no use case given\n");
+					printHelp(argv[0]);
+					return EXIT_FAILURE;
+				}
+				switch (argv[i][0]){
 				case 'A':
 					iUseCase=USE_CASE_A;
 					break;
@@ -819,15 +825,26 @@ int main(int argc, char *argv[])
 					printHelp(argv[0]);
 					return EXIT_FAILURE;
 				}
-				break;
+				continue;
 			}
 			if(!strcmp(argv[i],"-h")){
 				printHelp(argv[0]);
 				return EXIT_SUCCESS;
 			}
-			printf("unknown option \"%s\"is ignored \n",argv[i]);
+			if (argv[i][0] == '-'){
+				printf("unknown option \"%s\" is ignored \n",argv[i]);
+			} else {
+				i--;
+				break;
+			}
 		}
-		szFilename=(char*)argv[argc-1]; // the last command line parameter is always the filename
+		if (i < argc) {
+			szFilename=(char*)argv[argc-1]; // the last command line parameter is always the filename
+		} else {
+			printf("error: no filename given\n");
+			printHelp(argv[0]);
+			return EXIT_FAILURE;
+		}
 		if(strlen(szFilename)>4)
 		{
 			strcpy(szInFileSuffix, &szFilename[strlen(szFilename)-4]);
